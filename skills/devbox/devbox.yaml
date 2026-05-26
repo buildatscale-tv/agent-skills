@@ -1,0 +1,8 @@
+# Minimal Namespace devbox spec. Repo-agnostic, runtime-agnostic.
+# name_prefix is rewritten per dispatch. Repo is passed via --checkout.
+# Agent profiles add their own sessions/services via SSH after creation.
+name_prefix: agent-
+image: builtin:agents
+size: M
+volume_size_gb: 100
+auto_stop_idle_timeout: 1h
