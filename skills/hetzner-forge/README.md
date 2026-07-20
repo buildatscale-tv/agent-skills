@@ -55,7 +55,9 @@ it will run the whole flow, asking only what it needs.
 
 ## Configuration
 
-All knobs are documented in `pulumi/Pulumi.example.yaml`. Highlights:
+There's no example/placeholder config to copy — the skill sets every value with
+`pulumi config set`. Every knob and its default is the typed loader in
+`pulumi/src/config.ts` (the source of truth). Highlights:
 
 | Key | Default | Notes |
 |---|---|---|
@@ -102,15 +104,17 @@ Snapshot or detach any volume first if you want to keep its data.
 ```
 hetzner-forge/
 ├── SKILL.md              # the guided setup flow (what agents follow)
-├── README.md            # this file
-├── profiles/            # per-workload playbooks
+├── README.md             # this file
+├── profiles/             # per-workload playbooks
 │   ├── coolify.md
 │   ├── dokploy.md
+│   ├── opencode.md
 │   └── from-scratch.md
-└── pulumi/              # the Pulumi TypeScript program
-    ├── Pulumi.yaml
-    ├── Pulumi.example.yaml
+└── pulumi/               # the self-contained Pulumi TypeScript program
+    ├── Pulumi.yaml       # project file (per-stack Pulumi.<stack>.yaml is generated, gitignored)
+    ├── package.json      # deps pinned to exact versions (no drift)
+    ├── tsconfig.json
     ├── index.ts
     ├── src/{config,workloads,hardening,peripherals}.ts
-    └── scripts/harden.sh
+    └── scripts/{harden.sh, install-opencode.sh}
 ```

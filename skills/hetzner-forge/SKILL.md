@@ -84,14 +84,22 @@ Never invent an installer. Use the vendor's documented method or an official ima
 
 ### Step 3: Scaffold + configure
 
-The Pulumi **program** ships in `pulumi/` — that's the domain logic; run it, don't
-rewrite it. The Pulumi **mechanics** (project/stack/backend/login) are generic and
-change over time, so read the current docs instead of guessing:
-[get started](https://www.pulumi.com/docs/iac/get-started/) ·
-[hcloud provider](https://www.pulumi.com/registry/packages/hcloud/) ·
-[config & secrets](https://www.pulumi.com/docs/iac/concepts/config/). Then, from
-`pulumi/` (copy it to the user's project as `infra/` if they have one): `npm
-install`, pick a state backend, and select/create a stack.
+The Pulumi **program** ships complete in `pulumi/` — that's the domain logic; run
+it, don't rewrite it. There is **no example/placeholder config to fill in**: you
+set every value with `pulumi config set` below. The full list of knobs and their
+defaults is the typed loader in `src/config.ts` — that's the source of truth.
+
+Bootstrap the project (these Pulumi CLI commands are stable; if one has changed,
+`pulumi <cmd> --help` or [the docs](https://www.pulumi.com/docs/iac/get-started/)):
+
+```bash
+cd pulumi                    # or copy pulumi/ into the user's repo as infra/ and cd there
+npm install                  # deps are pinned in package.json (no drift)
+
+# Pick a state backend, then create the stack:
+pulumi login                 # Pulumi Cloud (free) — OR: pulumi login --local  (state on this machine)
+pulumi stack init prod       # names the stack; 'prod' is fine
+```
 
 Set config (unprefixed keys are read by `src/config.ts`; `hcloud:token` is the provider credential):
 
