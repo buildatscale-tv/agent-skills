@@ -22,6 +22,11 @@ JSON
 )
 chown -R "${ADMIN_USER}:${ADMIN_USER}" "${ADMIN_HOME}/.local"   # opencode also writes ~/.local/state at runtime
 
+# --- starter project so the box isn't empty (opencode needs a project to start a session) ---
+install -d -m 0755 "${ADMIN_HOME}/projects/scratch"
+printf '# Scratch\nStarter project for OpenCode. Add your own repos under ~/projects.\n' > "${ADMIN_HOME}/projects/scratch/README.md"
+chown -R "${ADMIN_USER}:${ADMIN_USER}" "${ADMIN_HOME}/projects"
+
 # --- opencode serve on loopback (fronted by nginx) ---
 cat > /etc/systemd/system/opencode-serve.service <<UNIT
 [Unit]
@@ -46,6 +51,10 @@ systemctl enable --now opencode-serve.service
 # --- nginx basic-auth reverse proxy on the access port (opencode has no native auth) ---
 htpasswd -bcB /etc/nginx/.htpasswd "${OPENCODE_USER}" "${OPENCODE_PASSWORD}"
 cat > /etc/nginx/sites-available/opencode <<'NGINX'
+map $http_upgrade $connection_upgrade {
+  default upgrade;
+  ""      "";
+}
 server {
   listen 4096;
   location / {
@@ -55,7 +64,9 @@ server {
     proxy_http_version 1.1;
     proxy_set_header Host $host;
     proxy_set_header Upgrade $http_upgrade;
-    proxy_set_header Connection "upgrade";
+    proxy_set_header Connection $connection_upgrade;   # SSE-safe: no forced upgrade on the event stream
+    proxy_buffering off;                                # opencode uses a live event stream
+    proxy_read_timeout 3600s;
   }
 }
 NGINX

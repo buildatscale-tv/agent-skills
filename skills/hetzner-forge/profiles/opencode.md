@@ -37,6 +37,17 @@ The access port (4096) is **closed on the public firewall**:
 If the user's ssh-agent holds many keys, hardening's `MaxAuthTries 3` can reject
 the connection — use `-i <the key> -o IdentitiesOnly=yes`.
 
+## Making your first session
+
+OpenCode starts every chat inside a **project (a directory)** — "New session" does
+nothing until one is open. The box ships with a starter `~/projects/scratch`. In the
+web UI: **Add project** → in the folder box **type a path** (e.g. `/home/deploy/projects`
+— it's a *path* picker, not a name search) → open `scratch` → **New session**. Add your
+own repos under `~/projects/`.
+
+> Log in via the browser's basic-auth prompt (a clean URL). Don't embed the login in
+> the URL (`user:pass@host`) — opencode's client router mishandles URL userinfo.
+
 ## Notes
 
 - **Secrets** (the API key, the web password) are passed as env into cloud-init and land in the box's user-data metadata. Prefer rotatable keys; rotate if torn down.
