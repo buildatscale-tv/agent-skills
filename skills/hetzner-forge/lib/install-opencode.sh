@@ -31,6 +31,11 @@ JSON
 )
 chown -R "$OC_USER:$OC_USER" "$OC_HOME/.local"   # opencode also writes ~/.local/state at runtime
 
+# --- default model so a fresh session is ready to chat (configurable via FORGE_OPENCODE_MODEL) ---
+install -d -m 755 -o "$OC_USER" -g "$OC_USER" "$OC_HOME/.config/opencode"
+printf '{"model":"%s"}\n' "${OPENCODE_MODEL:-opencode-go/kimi-k3}" > "$OC_HOME/.config/opencode/opencode.json"
+chown -R "$OC_USER:$OC_USER" "$OC_HOME/.config"
+
 # --- starter project in the designated folder, manageable by the admin user via group ---
 install -d "$OC_HOME/projects/scratch"
 printf '# Scratch\nStarter project for OpenCode. Add your own repos under ~/projects.\n' > "$OC_HOME/projects/scratch/README.md"
