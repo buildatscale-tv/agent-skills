@@ -3,3 +3,4 @@ bin/
 *.log
 .env
 Pulumi.test.yaml
+package-lock.json   # not pinned — npm resolves latest within the caret ranges in package.json

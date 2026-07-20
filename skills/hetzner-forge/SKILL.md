@@ -84,15 +84,14 @@ Never invent an installer. Use the vendor's documented method or an official ima
 
 ### Step 3: Scaffold + configure
 
-Decide where the infra lives. If the user has a target project, copy `pulumi/` into it as `infra/`; otherwise run in place under this skill.
-
-```bash
-SRC="$(dirname "$0")/pulumi"          # this skill's pulumi/ template (adjust to install path)
-DEST="./infra"                         # or the user's chosen location
-cp -R "$SRC" "$DEST" && cd "$DEST"
-npm install
-pulumi stack init prod                 # or `pulumi stack select prod`
-```
+The Pulumi **program** ships in `pulumi/` — that's the domain logic; run it, don't
+rewrite it. The Pulumi **mechanics** (project/stack/backend/login) are generic and
+change over time, so read the current docs instead of guessing:
+[get started](https://www.pulumi.com/docs/iac/get-started/) ·
+[hcloud provider](https://www.pulumi.com/registry/packages/hcloud/) ·
+[config & secrets](https://www.pulumi.com/docs/iac/concepts/config/). Then, from
+`pulumi/` (copy it to the user's project as `infra/` if they have one): `npm
+install`, pick a state backend, and select/create a stack.
 
 Set config (unprefixed keys are read by `src/config.ts`; `hcloud:token` is the provider credential):
 
@@ -108,6 +107,8 @@ pulumi config set serverType  cpx21
 pulumi config set workload    coolify
 pulumi config set access      ssh
 pulumi config set sshPublicKey "$(cat ~/.ssh/id_ed25519.pub)"
+# Lock SSH to the user's own IP by default (don't open 22 to the world) — detect it:
+pulumi config set sshSource "$(curl -s https://api.ipify.org)/32"
 
 # OpenCode workload (workload=opencode) — see profiles/opencode.md:
 # pulumi config set opencodeApiKey "$OPENCODE_KEY" --secret          # the user's opencode-go key
