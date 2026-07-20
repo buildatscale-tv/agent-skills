@@ -2,59 +2,56 @@
 
 A hardened box running `opencode serve` behind an nginx **basic-auth** login, so
 you open the OpenCode web UI in a browser and drive it with your **opencode-go**
-subscription. From-scratch workload (no Hetzner image). opencode binds
-`127.0.0.1:4097`; nginx fronts it on the access port (`4096`) with a username +
-password. Reached **privately over an SSH tunnel** — never the public internet.
+subscription. From-scratch workload (no Hetzner image). opencode runs as a
+dedicated **non-sudo `opencode` system user** (the agent can never reach root)
+and binds `127.0.0.1:4097`; nginx fronts it on `:4096` with a username + password.
+Reached privately over an SSH tunnel.
 
-## Provisioning — what the driving agent does
+## Config
 
-1. **Get the opencode-go API key from the user** (only they have it; it's a secret).
-2. **Generate a strong web password**, pick a username (`FORGE_OPENCODE_USER`, default `opencode`). `forge.sh` generates the password if you don't pass one, and prints the login. Report both to the user.
-3. **Run forge.sh**:
-   ```bash
-   export FORGE_SSH_PUBKEY="$(cat ~/.ssh/id_ed25519.pub)"
-   export FORGE_NAME=forge-oc FORGE_WORKLOAD=opencode FORGE_ACCESS=ssh
-   export FORGE_TYPE=cpx21 FORGE_LOCATION=hil
-   export FORGE_OPENCODE_API_KEY="<opencode-go key>" FORGE_OPENCODE_USER=forge
-   bash forge.sh
-   ```
-4. **Report** the IPv4, the login (username + generated password), and the SSH tunnel command.
+```bash
+pulumi config set workload       opencode
+pulumi config set access         ssh
+pulumi config set serverType     cpx21          # hil offers the cpxN1 line; 4 GB is plenty
+pulumi config set sshPublicKey   "$(cat ~/.ssh/id_ed25519.pub)"
+pulumi config set opencodeUser   forge          # nginx web-login username
+pulumi config set opencodeApiKey   "<opencode-go key>"                              --secret
+pulumi config set opencodePassword "$(openssl rand -base64 18 | tr -dc A-Za-z0-9)"  --secret
+# optional: pulumi config set opencodeModel opencode-go/kimi-k3   (this is the default)
+```
+Then `pulumi up`. Report the IPv4, the login (`opencodeUser` + generated password),
+and the SSH-tunnel command.
 
-## What the install does (`lib/install-opencode.sh`, in cloud-init after hardening)
+## What the install does (`scripts/install-opencode.sh`, in cloud-init after hardening)
 
 1. Installs Node 22, opencode (system-wide binary), nginx, apache2-utils.
-2. Creates a **dedicated non-sudo `opencode` system user** — opencode and every agent session run as this user, so the agent can never escalate to root.
-3. Writes `/home/opencode/.local/share/opencode/auth.json` = `{"opencode-go":{"type":"api","key":"<key>"}}` (mode 0600); `chown -R` its `~/.local` (opencode writes `~/.local/state` at runtime).
-4. Creates a starter project `/home/opencode/projects/scratch` and adds the admin user to the `opencode` group (setgid, group-writable) so you can add projects without sudo.
-5. `opencode-serve.service` runs `opencode serve --hostname 127.0.0.1 --port 4097` as the `opencode` user.
-6. nginx listens on `4096` with `auth_basic` (htpasswd/bcrypt) → SSE-safe reverse-proxy to `127.0.0.1:4097`.
+2. Creates a **dedicated non-sudo `opencode` system user** — opencode + every agent session run as it.
+3. Writes `auth.json` for opencode-go and a default model (`opencodeModel`, Kimi K3) in `~/.config/opencode`.
+4. Creates a starter project `/home/opencode/projects/scratch` (setgid, group-writable; admin added to the `opencode` group → manage projects without sudo).
+5. `opencode-serve.service` runs `opencode serve --hostname 127.0.0.1 --port 4097` as `opencode`.
+6. nginx on `:4096` with `auth_basic` → **SSE-safe** reverse-proxy to `127.0.0.1:4097`.
 
 ## Reaching it (private, via SSH tunnel)
 
-The access port (4096) is **closed on the public firewall**:
+- **This Mac:** `ssh -L 4096:localhost:4096 <adminUser>@<ipv4>` → `http://localhost:4096`
+- **Phone / LAN:** `ssh -L 0.0.0.0:4096:localhost:4096 <adminUser>@<ipv4>` → `http://<mac-lan-ip>:4096`
 
-- **Just this Mac:** `ssh -L 4096:localhost:4096 <adminUser>@<ipv4>` → `http://localhost:4096`.
-- **Phone / other LAN devices:** `ssh -L 0.0.0.0:4096:localhost:4096 <adminUser>@<ipv4>` → `http://<mac-lan-ip>:4096`.
-
-If the user's ssh-agent holds many keys, hardening's `MaxAuthTries 3` can reject
-the connection — use `-i <the key> -o IdentitiesOnly=yes`.
+If your ssh-agent holds many keys, use `-i <key> -o IdentitiesOnly=yes` (harden.sh caps `MaxAuthTries`).
 
 ## Making your first session
 
-OpenCode starts every chat inside a **project (a directory)** — "New session" does
-nothing until one is open. The box ships with a starter at `/home/opencode/projects/scratch`.
+opencode starts every chat inside a **project (a directory)** — "New session"
+does nothing until one is open. The box ships with `/home/opencode/projects/scratch`.
 In the web UI: **Add project** → in the folder box **type a path**
-(`/home/opencode/projects` — it's a *path* picker, not a name search) → open `scratch`
-→ **New session**. Add your own repos under `/home/opencode/projects/` (you're in the
-`opencode` group, so no sudo needed).
+(`/home/opencode/projects` — it's a *path* picker, not a name search) → open
+`scratch` → **New session**. The default model is Kimi K3.
 
-> Log in via the browser's basic-auth prompt (a clean URL). Don't embed the login in
-> the URL (`user:pass@host`) — opencode's client router mishandles URL userinfo.
+> Log in via the browser's basic-auth prompt (a clean URL). Don't embed the login
+> in the URL (`user:pass@host`) — opencode's client router mishandles URL userinfo.
 
 ## Notes
 
-- **Secrets** (the API key, the web password) are passed as env into cloud-init and land in the box's user-data metadata. Prefer rotatable keys; rotate if torn down.
-- Sizing: opencode is a lightweight client (models run remotely via opencode-go). `cpx21` (4 GB) is plenty.
-- Verify: `ssh <adminUser>@<ipv4> 'systemctl is-active opencode-serve nginx'` and `curl -u user:pass http://localhost:4096/` (200 through the tunnel; 401 without auth).
-- Auth mechanism confirmed against a working local install: opencode-go uses `type:"api"` + `key`. If opencode changes its schema, update `lib/install-opencode.sh`.
-- `HOME` must be set for the opencode installer (cloud-init runs as root with `HOME` unset) — `lib/install-opencode.sh` sets it.
+- Secrets (API key, web password) are Pulumi secrets (encrypted in state) and also land in the box's cloud-init user_data. Prefer rotatable keys; rotate if torn down.
+- opencode is a lightweight client (models run remotely via opencode-go), so `cpx21` (4 GB) is plenty.
+- Verify: `ssh <adminUser>@<ipv4> 'systemctl is-active opencode-serve nginx'`.
+- opencode-go auth is `{"opencode-go":{"type":"api","key":"…"}}`. If opencode changes its schema, update `scripts/install-opencode.sh`.

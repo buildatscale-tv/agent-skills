@@ -1,96 +1,116 @@
 # /hetzner-forge
 
 Spin up a **hardened, preconfigured Hetzner Cloud box** with one guided flow —
-built with the **`hcloud` CLI + cloud-init**. A foundational `/infra` you can
-point at whatever it turns out to be: a plain hardened server, Coolify, Docker,
-Dokploy, or an OpenCode server you drive from your browser.
+assembled and managed as code with **Pulumi (TypeScript)**. A foundational
+`/infra` you can point at whatever it turns out to be: a plain hardened server,
+Coolify, Docker, Dokploy, or any provider you resolve on the fly.
 
-No Pulumi, no state backend, no language runtime — just `hcloud` and a cloud-init
-script. The skill hand-holds setup (`SKILL.md`); `forge.sh` is the entrypoint.
+The skill hand-holds you through setup (`SKILL.md`); the `pulumi/` directory is
+the reusable program it drives.
 
 ## What you get
 
-Every box ships with the same **base hardening** (`lib/harden.sh`), then layers a
-workload:
+Every box ships with the same **base hardening**, then layers your workload:
 
-- Non-root **sudo user** with your SSH key; root login `prohibit-password`
-- **Key-only SSH** (`MaxAuthTries 3`, no password auth)
-- **UFW** default-deny + **fail2ban** on sshd
+- Non-root **sudo user** with your SSH key; root login set to `prohibit-password`
+- **Key-only SSH** (password auth off), `MaxAuthTries` capped
+- **UFW** default-deny incoming + **fail2ban** on sshd
 - **Unattended security upgrades**, timezone, optional swap
 - A **Hetzner Cloud Firewall** as the authoritative ingress gate
+- Your choice of **access model**: hardened public SSH, or **Tailscale** mesh with SSH as a locked-down fallback
 
 ## Workloads
 
-| Workload | How | Ports |
+| Workload | How it's provisioned | Ports opened |
 |---|---|---|
 | `base` | Just the hardened box | — |
-| `coolify` | Official Hetzner `coolify` image + hardening | 80, 443, 8000 |
-| `docker` | Official `docker-ce` image + hardening | — (`FORGE_EXTRA_PORTS`) |
-| `dokploy` | From-scratch via the vendor installer | 80, 443, 3000 |
-| `opencode` | From-scratch: `opencode serve` behind **nginx basic-auth**, reached privately over an SSH tunnel | — (tunnel) |
+| `coolify` | Official Hetzner **`coolify`** image + post-harden | 80, 443, 8000 |
+| `docker` | Official **`docker-ce`** image + post-harden | — (add via `extraPorts`) |
+| `dokploy` | **From-scratch** (no image) via the vendor installer | 80, 443, 3000 |
+| `opencode` | **From-scratch** OpenCode server — `opencode serve` behind nginx basic-auth, run as a non-sudo user, reached via SSH tunnel | — (tunnel) |
+| `custom` | Skill-resolved: official image if one exists, else documented from-scratch | you specify |
+
+**The rule:** prefer a supported Hetzner path (official app image) when one
+exists; fall back to the provider's **documented** install procedure only when
+no image is available. The skill checks `hcloud image list --type app` live and
+looks up vendor docs for anything unknown — see `profiles/from-scratch.md`.
 
 ## Quick start
 
 ```bash
-export FORGE_SSH_PUBKEY="$(cat ~/.ssh/id_ed25519.pub)"
-export FORGE_NAME=forge-oc FORGE_WORKLOAD=opencode FORGE_TYPE=cpx21 FORGE_LOCATION=hil
-export FORGE_OPENCODE_API_KEY="$OPENCODE_KEY" FORGE_OPENCODE_USER=forge
-bash forge.sh
-# forge.sh --print-user-data  → build+print the cloud-init, create nothing
+cd pulumi
+npm install
+pulumi stack init prod
+
+pulumi config set hcloud:token "$HETZNER_TOKEN" --secret
+pulumi config set workload coolify
+pulumi config set sshPublicKey "$(cat ~/.ssh/id_ed25519.pub)"
+
+pulumi up
+pulumi stack output nextSteps
 ```
 
-Or ask an agent: **"/hetzner-forge make me an OpenCode box in Hillsboro"** and it
-runs the flow, asking only what it needs.
+Or just ask an agent: **"/hetzner-forge spin up a Coolify box in Hillsboro"** and
+it will run the whole flow, asking only what it needs.
 
-## The OpenCode box
+## Configuration
 
-`opencode serve` has no built-in auth, so it binds `127.0.0.1:4097` and **nginx**
-fronts it on `:4096` with an HTTP basic-auth login (username + generated
-password). The access port stays **closed on the public firewall** — reach it
-privately over an SSH tunnel:
+All knobs are documented in `pulumi/Pulumi.example.yaml`. Highlights:
 
-```bash
-# just this Mac
-ssh -L 4096:localhost:4096 <adminUser>@<ip>            # then http://localhost:4096
-# phone / other LAN devices
-ssh -L 0.0.0.0:4096:localhost:4096 <adminUser>@<ip>    # then http://<mac-lan-ip>:4096
-```
+| Key | Default | Notes |
+|---|---|---|
+| `location` | `hil` | `hil` (US-West), `ash` (US-East), `fsn1`/`nbg1`/`hel1` (EU), `sin` (APAC) |
+| `serverType` | `cpx21` | 3 vCPU / 4 GB. **`hil` only offers the `cpxN1` line** — `cpx22`/newer is EU-only |
+| `access` | `ssh` | `ssh` or `tailscale` (needs `tailscaleAuthKey --secret`) |
+| `sshSource` | `0.0.0.0/0` | CIDR allowed to reach SSH — tighten to your IP/32 |
+| `volumeSizeGb` | `0` | >0 attaches a formatted, automounted volume |
+| `privateNetwork` | `false` | private network + subnet, box attached |
+| `primaryIpv4` | `false` | stable IPv4 that survives rebuilds (needs `primaryIpDatacenter`) |
+| `extraPorts` | — | extra ingress TCP ports, e.g. `8080,9000` |
 
-It authenticates with your **opencode-go** subscription (the API key you supply
-is written to `~/.local/share/opencode/auth.json` on the box). See
-`profiles/opencode.md`.
+## How the two hardening paths work
 
-## Config (FORGE_* env)
+- **Official app image** (coolify/docker): the image runs its own first-boot
+  setup, so we don't fight it with our own cloud-init. The box boots the image,
+  then Pulumi SSHes in and runs `harden.sh` (the "post-harden" step). Requires
+  `sshPrivateKeyPath` (default `~/.ssh/id_ed25519`).
+- **From-scratch** (dokploy/base/custom-install): `harden.sh` and the workload
+  installer run via cloud-init on first boot, before the box is exposed.
 
-All documented in `forge.sh`'s header. Highlights: `FORGE_NAME`, `FORGE_LOCATION`
-(`hil` default — note hil only offers the `cpxN1` line), `FORGE_TYPE` (`cpx21`),
-`FORGE_WORKLOAD`, `FORGE_ACCESS` (`ssh`|`tailscale`), `FORGE_SSH_PUBKEY`,
-`FORGE_EXTRA_PORTS`, `FORGE_TAILSCALE_AUTHKEY`, and the `FORGE_OPENCODE_*` set.
+Same `scripts/harden.sh` in both — one source of truth.
+
+> **Docker + UFW:** published container ports bypass UFW via Docker's iptables
+> chain. For Docker-based workloads the **Hetzner Cloud Firewall** is what
+> actually gates ingress; UFW is there for host-level services.
 
 ## Teardown
 
 ```bash
-hcloud server delete <name>
-hcloud firewall delete <name>-fw
+pulumi destroy      # removes everything this stack created
 ```
+
+Snapshot or detach any volume first if you want to keep its data.
 
 ## Requirements
 
 - `hcloud` CLI with a **Read & Write** API token in the active context
-- `python3` (key-reuse lookup), `openssl` (password generation)
+- `pulumi` + a state backend (Pulumi Cloud or `pulumi login --local`)
+- Node 18+
 
 ## Layout
 
 ```
 hetzner-forge/
-├── SKILL.md              # the guided flow (what agents follow)
-├── README.md             # this file
-├── forge.sh              # entrypoint: cloud-init + hcloud create
-├── lib/
-│   ├── harden.sh         # base hardening (runs first on the box)
-│   ├── workloads.sh      # workload → image / install / ports
-│   ├── install-opencode.sh
-│   └── install-dokploy.sh
-└── profiles/             # per-workload playbooks
-    ├── opencode.md  coolify.md  dokploy.md  from-scratch.md
+├── SKILL.md              # the guided setup flow (what agents follow)
+├── README.md            # this file
+├── profiles/            # per-workload playbooks
+│   ├── coolify.md
+│   ├── dokploy.md
+│   └── from-scratch.md
+└── pulumi/              # the Pulumi TypeScript program
+    ├── Pulumi.yaml
+    ├── Pulumi.example.yaml
+    ├── index.ts
+    ├── src/{config,workloads,hardening,peripherals}.ts
+    └── scripts/harden.sh
 ```

@@ -12,7 +12,7 @@ Create, manage, and tear down [Namespace](https://namespace.so/?ref=buildatscale
 
 ### [/hetzner-forge](skills/hetzner-forge/)
 
-Provision a hardened, ready-to-go [Hetzner Cloud](https://www.hetzner.com/cloud) box with the `hcloud` CLI + cloud-init in one guided flow — no Pulumi. Base hardening (non-root sudo user, key-only SSH, UFW, fail2ban, unattended upgrades, Cloud Firewall) plus a pluggable workload — Coolify, Docker, Dokploy, an OpenCode server (browser UI behind a login), or a custom target resolved from official images or the vendor's documented install.
+Provision a hardened, ready-to-go [Hetzner Cloud](https://www.hetzner.com/cloud) box with **Pulumi (TypeScript)** in one guided flow. Base hardening (non-root sudo user, key-only SSH, UFW, fail2ban, unattended upgrades, Cloud Firewall) plus a pluggable workload — Coolify, Docker, Dokploy, an OpenCode server (browser UI behind a login, run as a non-sudo user), or a custom target resolved from official images or the vendor's documented install. State-managed: `pulumi up` to reconcile, `pulumi destroy` for a clean teardown.
 
 ## Install
 
