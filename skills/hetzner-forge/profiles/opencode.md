@@ -22,10 +22,12 @@ password. Reached **privately over an SSH tunnel** — never the public internet
 
 ## What the install does (`lib/install-opencode.sh`, in cloud-init after hardening)
 
-1. Installs Node 22, opencode, nginx, apache2-utils.
-2. Writes `~/.local/share/opencode/auth.json` = `{"opencode-go":{"type":"api","key":"<key>"}}` (mode 0600), and `chown -R` the admin user's `~/.local` (opencode also writes `~/.local/state` at runtime).
-3. `opencode-serve.service` runs `opencode serve --hostname 127.0.0.1 --port 4097` as the admin user with `HOME` set.
-4. nginx listens on `4096` with `auth_basic` (htpasswd/bcrypt) → reverse-proxies to `127.0.0.1:4097`.
+1. Installs Node 22, opencode (system-wide binary), nginx, apache2-utils.
+2. Creates a **dedicated non-sudo `opencode` system user** — opencode and every agent session run as this user, so the agent can never escalate to root.
+3. Writes `/home/opencode/.local/share/opencode/auth.json` = `{"opencode-go":{"type":"api","key":"<key>"}}` (mode 0600); `chown -R` its `~/.local` (opencode writes `~/.local/state` at runtime).
+4. Creates a starter project `/home/opencode/projects/scratch` and adds the admin user to the `opencode` group (setgid, group-writable) so you can add projects without sudo.
+5. `opencode-serve.service` runs `opencode serve --hostname 127.0.0.1 --port 4097` as the `opencode` user.
+6. nginx listens on `4096` with `auth_basic` (htpasswd/bcrypt) → SSE-safe reverse-proxy to `127.0.0.1:4097`.
 
 ## Reaching it (private, via SSH tunnel)
 
@@ -40,10 +42,11 @@ the connection — use `-i <the key> -o IdentitiesOnly=yes`.
 ## Making your first session
 
 OpenCode starts every chat inside a **project (a directory)** — "New session" does
-nothing until one is open. The box ships with a starter `~/projects/scratch`. In the
-web UI: **Add project** → in the folder box **type a path** (e.g. `/home/deploy/projects`
-— it's a *path* picker, not a name search) → open `scratch` → **New session**. Add your
-own repos under `~/projects/`.
+nothing until one is open. The box ships with a starter at `/home/opencode/projects/scratch`.
+In the web UI: **Add project** → in the folder box **type a path**
+(`/home/opencode/projects` — it's a *path* picker, not a name search) → open `scratch`
+→ **New session**. Add your own repos under `/home/opencode/projects/` (you're in the
+`opencode` group, so no sudo needed).
 
 > Log in via the browser's basic-auth prompt (a clean URL). Don't embed the login in
 > the URL (`user:pass@host`) — opencode's client router mishandles URL userinfo.
