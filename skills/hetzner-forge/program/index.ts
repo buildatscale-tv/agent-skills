@@ -216,7 +216,9 @@ FORGE_EOF`,
       `${cfg.name}-tailscale-up`,
       {
         connection: adminConnection,
-        create: pulumi.interpolate`${waitForCloudInit}sudo tailscale up --ssh --authkey ${cfg.tailscaleAuthKey}`,
+        // Tailscale may not be installed if the box was originally created with
+        // access=ssh. Install it only if missing, then authenticate.
+        create: pulumi.interpolate`${waitForCloudInit}(command -v tailscale >/dev/null 2>&1 || curl -fsSL https://tailscale.com/install.sh | sh) && sudo tailscale up --ssh --authkey ${cfg.tailscaleAuthKey}`,
         triggers: [server.id],
       },
       { dependsOn: [server] },

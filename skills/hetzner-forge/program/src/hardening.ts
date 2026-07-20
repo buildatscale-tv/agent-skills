@@ -35,7 +35,6 @@ export function hardenEnvBase(cfg: ForgeConfig, w: WorkloadSpec): string {
   return (
     `ADMIN_USER=${shq(cfg.adminUser)} ` +
     `ADMIN_SSH_PUBKEY=${shq(cfg.sshPublicKey)} ` +
-    `ACCESS=${shq(cfg.access)} ` +
     `TIMEZONE=${shq(cfg.timezone)} ` +
     `SWAP_GB=${shq(String(cfg.swapSizeGb))} ` +
     `ADMIN_CIDRS=${shq(cfg.adminCidrs.join(" "))} ` +
