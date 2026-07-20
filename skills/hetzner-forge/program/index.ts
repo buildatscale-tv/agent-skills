@@ -166,11 +166,10 @@ if (cfg.volumeSizeGb > 0) {
 // - Image path: connect as root (fresh image allows root key login), run
 //   harden.sh, which locks root SSH only as its LAST step. An established
 //   session survives the restart.
-// - From-scratch post-boot: connect as the admin user. harden.sh has already
-//   completed (the command waits for cloud-init), so root login is disabled
-//   but the admin user exists with NOPASSWD sudo.
-// If a from-scratch step fails because the admin user didn't exist yet, just
-// re-run `pulumi up` — it converges deterministically.
+// - From-scratch post-boot: connect as the admin user. harden.sh creates that
+//   user and enables UFW inside cloud-init, so we retry the SSH dial long
+//   enough for first-boot package upgrades and hardening to finish. Once the
+//   admin user exists and UFW is configured, the install proceeds.
 const waitForCloudInit = "cloud-init status --wait >/dev/null 2>&1 || true; ";
 const needsTailscaleUp = !imageBased && cfg.access === "tailscale";
 const needsSecretInstall = !imageBased && !!workload.install && !!workload.installNeedsSecrets;
@@ -178,15 +177,21 @@ const needsSecretInstall = !imageBased && !!workload.install && !!workload.insta
 if (imageBased || needsTailscaleUp || needsSecretInstall) {
   const privateKey = fs.readFileSync(expandTilde(cfg.sshPrivateKeyPath), "utf8");
 
+  // Long retry windows avoid false failures while cloud-init installs packages,
+  // creates the admin user, and configures UFW. Default 10x15s is too short.
   const rootConnection: command.types.input.remote.ConnectionArgs = {
     host: server.ipv4Address,
     user: "root",
     privateKey,
+    dialErrorLimit: 60,
+    perDialTimeout: 15,
   };
   const adminConnection: command.types.input.remote.ConnectionArgs = {
     host: server.ipv4Address,
     user: cfg.adminUser,
     privateKey,
+    dialErrorLimit: 180,
+    perDialTimeout: 15,
   };
 
   // Image path: the official image does its own first-boot setup; harden over SSH.
@@ -237,14 +242,44 @@ FORGE_EOF`,
 }
 
 // --- Outputs ---------------------------------------------------------------
+const projectDir = process.cwd();
+const fmtPorts = (ps: number[]) => (ps.length ? ps.join(", ") : "none");
+const opencodeApiKeyStatus = cfg.opencodeApiKey
+  ? pulumi.output("provided as Pulumi secret")
+  : pulumi.output("NOT provided — add manually via SSH before using OpenCode");
+
 export const serverId = server.id;
+export const serverName = server.name;
 export const ipv4 = server.ipv4Address;
 export const ipv6 = server.ipv6Address;
 export const status = server.status;
+export const serverTypeOut = pulumi.output(cfg.serverType);
+export const serverLocation = pulumi.output(cfg.location);
+export const baseImage = pulumi.output(image);
+export const adminUserOut = pulumi.output(cfg.adminUser);
+export const adminCidrsOut = pulumi.output(cfg.adminCidrs).apply((cs) => cs.join(", "));
 export const sshCommand = pulumi.interpolate`ssh ${cfg.adminUser}@${server.ipv4Address}`;
+export const sshKeyName = sshKey.name;
+export const sshKeyFingerprint = sshKey.fingerprint;
+export const firewallName = firewall.name;
+export const adminPortsOut = pulumi.output(fmtPorts(adminPorts));
+export const publicPortsOut = pulumi.output(fmtPorts(publicPorts));
 export const workloadKey = workload.key;
 export const appHint = workload.ready;
-const fmtPorts = (ps: number[]) => (ps.length ? ps.join(", ") : "none");
+export const opencodeUsername = pulumi.output(cfg.opencodeUsername);
+export const opencodePort = pulumi.output(cfg.opencodePort);
+export const opencodeModel = pulumi.output(cfg.opencodeModel);
+export const opencodeApiKeyStatusOut = opencodeApiKeyStatus;
+export const opencodePassword = cfg.opencodePassword;
+export const webUrl = pulumi.interpolate`http://localhost:${cfg.opencodePort}`;
+export const sshTunnelCommand = pulumi.interpolate`ssh -L ${cfg.opencodePort}:localhost:${cfg.opencodePort} ${cfg.adminUser}@${server.ipv4Address}`;
+
+// Helper for the summary line about the password. Kept separate so the summary
+// itself does not become a Pulumi secret and is readable by default.
+const passwordHint = pulumi.output(
+  "stored as a Pulumi secret — run `pulumi stack output opencodePassword --show-secrets`",
+);
+
 export const nextSteps = pulumi.interpolate`
 Box '${cfg.name}' (${cfg.serverType} @ ${cfg.location}) is up.
 
@@ -260,4 +295,83 @@ open to the world. Gated by the Hetzner Cloud Firewall, attached at creation.
 
 Hardened with a non-root sudo user ('${cfg.adminUser}'), key-only SSH, root login
 disabled, UFW default-deny, fail2ban, and unattended security upgrades.
+`;
+
+// A human-friendly markdown summary of the entire box. It is NOT a secret by
+// default, so it is readable with `pulumi stack output summary`. The generated
+// web password is emitted as a separate secret output and retrieved with
+// `pulumi stack output opencodePassword --show-secrets`.
+export const summary = pulumi.interpolate`
+## Infrastructure Summary
+
+| Attribute | Value |
+|---|---|
+| Server name | ${cfg.name} |
+| Server ID | ${server.id} |
+| Status | ${server.status} |
+| Server type | ${cfg.serverType} |
+| Location | ${cfg.location} |
+| Base image | ${image} |
+| Public IPv4 | ${server.ipv4Address} |
+| Public IPv6 | ${server.ipv6Address} |
+
+## Network and Firewall
+
+| Direction | Protocol | Port | Source | Description |
+|---|---|---|---|---|
+| Inbound | TCP | 22 | ${cfg.adminCidrs.join(", ")} | SSH (admin only) |
+| Inbound | ICMP | any | 0.0.0.0/0, ::/0 | ICMP |
+
+Admin ports: ${fmtPorts(adminPorts)}
+Public ports: ${fmtPorts(publicPorts)}
+
+## SSH Key
+
+| Name | Fingerprint |
+|---|---|
+| ${sshKey.name} | ${sshKey.fingerprint} |
+
+## Users and Access
+
+| User | UID/GID | Purpose | Sudo | SSH |
+|---|---|---|---|---|
+| root | 0/0 | System root | no | disabled |
+| ${cfg.adminUser} | 1000/1000 | Admin human user | NOPASSWD | key-only |
+| opencode | 1001/1001 | OpenCode service user | no | no direct SSH |
+
+SSH hardening: Port 22, PermitRootLogin no, PasswordAuthentication no, PubkeyAuthentication yes, AllowUsers ${cfg.adminUser}.
+
+## OpenCode
+
+| Attribute | Value |
+|---|---|
+| Service user | opencode |
+| Bind address | 127.0.0.1:${cfg.opencodePort} |
+| Web UI (via tunnel) | http://localhost:${cfg.opencodePort} |
+| Web username | ${cfg.opencodeUsername} |
+| Web password | ${passwordHint} |
+| Default model | ${cfg.opencodeModel} |
+| API key status | ${opencodeApiKeyStatus} |
+
+## Connecting
+
+SSH to the box:
+  ssh ${cfg.adminUser}@${server.ipv4Address}
+
+OpenCode via SSH tunnel:
+  ssh -L ${cfg.opencodePort}:localhost:${cfg.opencodePort} ${cfg.adminUser}@${server.ipv4Address}
+  Then open http://localhost:${cfg.opencodePort} and log in as ${cfg.opencodeUsername}.
+
+From your phone use an SSH client like Termius/iSH with the same tunnel.
+
+## Management
+
+Project directory (state, passphrase, stack config):
+  ${projectDir}
+
+If your IP changes:
+  pulumi config set adminCidrs <new-ip>/32 && pulumi up
+
+Teardown:
+  pulumi destroy --yes
 `;

@@ -61,6 +61,12 @@ paste at the user.
 
 ## Create flow
 
+> For secrets that should not pass through the agent's context (e.g. the
+> opencode-go API key), the agent scaffolds the project, sets all non-secret
+> config, and **pauses** so the user can run `pulumi config set ... --secret`
+> directly in the project directory. The agent verifies the secret is present,
+> then continues with `pulumi up`.
+
 ### Step 0: Preflight
 
 Run these checks and fix/surface any failure before continuing:
@@ -252,7 +258,11 @@ CIDRS="$V4"; [ -n "$V6" ] && CIDRS="$CIDRS,$V6/128"
 pulumi config set adminCidrs "$CIDRS"
 
 # OpenCode workload (workload=opencode) — see profiles/opencode.md:
-# pulumi config set opencodeApiKey "$OPENCODE_KEY" --secret          # the user's opencode-go key
+# The agent sets opencodePassword and opencodeUsername, then PAUSES and asks the
+# user to set opencodeApiKey directly as a Pulumi secret so the key never passes
+# through the agent's context. The user runs:
+#   export PULUMI_CONFIG_PASSPHRASE="$(cat .pulumi-passphrase)"
+#   pulumi config set opencodeApiKey "$OPENCODE_KEY" --secret
 # pulumi config set opencodePassword "$(openssl rand -base64 18 | tr -dc A-Za-z0-9)" --secret
 # pulumi config set opencodeUsername forge   # web-login username (default: opencode)
 
@@ -272,6 +282,23 @@ pulumi config set adminCidrs "$CIDRS"
 # pulumi config set extraPorts "8080,9000"      # additional you-only ports
 ```
 
+#### User-provided secrets (OpenCode API key, etc.)
+
+For secrets the user should not paste into the agent's context (e.g. the
+opencode-go API key), set everything else first, then **pause** and ask the user
+to run the final `pulumi config set` command themselves in the project directory:
+
+```bash
+cd <project>
+export PULUMI_CONFIG_PASSPHRASE="$(cat .pulumi-passphrase)"
+pulumi config set opencodeApiKey "$OPENCODE_KEY" --secret
+```
+
+The agent then verifies the key appears in `pulumi config` as `[secret]` and
+proceeds to `pulumi preview` / `pulumi up`. The plaintext key never passes
+through the agent; it is encrypted by the project passphrase and only Pulumi
+uses it during the SSH-delivered install step.
+
 The CLI token must be **Read & Write** for Pulumi to manage resources. If the
 active context's token is read-only, tell the user and have them create a Read &
 Write token (Hetzner console → Security → API Tokens) — that's a decision only
@@ -286,13 +313,16 @@ pulumi up --yes     # after they confirm
 
 ### Step 7: Report
 
-Print the outputs, especially `nextSteps` (it states exactly which ports are
-you-only vs public):
+Print the outputs. `nextSteps` states exactly which ports are you-only vs public;
+`summary` is a full markdown report. The generated web password is a separate
+Pulumi secret:
 
 ```bash
 pulumi stack output nextSteps
 pulumi stack output ipv4
 pulumi stack output sshCommand
+pulumi stack output summary
+pulumi stack output opencodePassword --show-secrets
 ```
 
 Cloud-init / post-boot steps take ~2-8 minutes after the server shows
@@ -355,9 +385,10 @@ holds only empty state — safe to delete, but only after `destroy` succeeded.
   workloads harden via cloud-init on first boot instead; the same
   `harden.sh` locks root SSH (`PermitRootLogin no`, `AllowUsers <admin>`)
   as its **last** step. From-scratch post-boot steps (Tailscale auth,
-  secret-bearing installs) connect as the admin user with `sudo`. If one
-  fails because the admin user didn't exist yet, simply re-run `pulumi up`
-  — it converges deterministically.
+  secret-bearing installs) connect as the admin user with `sudo`. Post-boot
+  SSH commands use extended dial retries (up to ~45 minutes for the admin
+  user) so they wait out first-boot package upgrades and UFW configuration
+  instead of failing immediately.
 - **Docker bypasses UFW.** Published container ports skip UFW via Docker's
   iptables chain. The **Hetzner Cloud Firewall** is the authoritative ingress
   gate; UFW hardens host-level services.

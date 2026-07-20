@@ -64,7 +64,7 @@ const REGISTRY: Record<string, Omit<WorkloadSpec, "key">> = {
       "Dokploy dashboard at http://<ipv4>:3000 (reachable only from your admin CIDRs). " +
       "Deployed apps are served publicly on 80/443.",
   },
-  // OpenCode server: `opencode serve` behind nginx basic-auth, run as a dedicated
+  // OpenCode server: `opencode web` with native password auth, run as a dedicated
   // non-sudo `opencode` user. Reached privately over an SSH tunnel — no ports opened
   // at all. The install needs secrets (API key, web password), so it runs post-boot
   // over SSH, never in user_data. See scripts/install-opencode.sh.

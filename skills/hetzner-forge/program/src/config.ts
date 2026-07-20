@@ -132,7 +132,11 @@ export function loadConfig(): ForgeConfig {
     customPorts: parsePorts(c.get("customPorts"), "customPorts"),
     customDocs: c.get("customDocs"),
 
-    opencodeApiKey: workload === "opencode" ? c.requireSecret("opencodeApiKey") : undefined,
+    // The opencode-go API key is optional. By default, give it to the agent as a
+    // Pulumi secret and it is delivered to the box over SSH (never via cloud-init).
+    // Omit it for a higher-security, higher-friction flow where you add the key
+    // manually over SSH after deploy. See profiles/opencode.md.
+    opencodeApiKey: workload === "opencode" ? c.getSecret("opencodeApiKey") : undefined,
     opencodeUsername: c.get("opencodeUsername") ?? "opencode",
     opencodePassword: workload === "opencode" ? c.requireSecret("opencodePassword") : undefined,
     opencodePort: c.getNumber("opencodePort") ?? 4096,

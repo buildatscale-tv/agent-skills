@@ -59,19 +59,18 @@ export function withTailscaleKey(base: string, cfg: ForgeConfig): pulumi.Output<
 /**
  * Env for a secret-bearing workload installer (opencode). Delivered over SSH
  * post-boot — never via cloud-init. Secret inputs keep the result encrypted
- * in Pulumi state.
+ * in Pulumi state. The opencode-go API key is optional; if omitted the
+ * installer writes a placeholder auth.json and the user adds the key manually.
  */
 export function installEnv(cfg: ForgeConfig): pulumi.Output<string> {
   const key = cfg.opencodeApiKey ?? pulumi.output("");
   const pass = cfg.opencodePassword ?? pulumi.output("");
   return pulumi.all([key, pass]).apply(([k, p]) => {
     let env = `ADMIN_USER=${shq(cfg.adminUser)} `;
-    if (k) {
-      env +=
-        `OPENCODE_API_KEY=${shq(k)} OPENCODE_PORT=${shq(String(cfg.opencodePort))} ` +
-        `OPENCODE_SERVER_USERNAME=${shq(cfg.opencodeUsername)} OPENCODE_SERVER_PASSWORD=${shq(p)} ` +
-        `OPENCODE_MODEL=${shq(cfg.opencodeModel)} `;
-    }
+    env +=
+      `OPENCODE_API_KEY=${shq(k)} OPENCODE_PORT=${shq(String(cfg.opencodePort))} ` +
+      `OPENCODE_SERVER_USERNAME=${shq(cfg.opencodeUsername)} OPENCODE_SERVER_PASSWORD=${shq(p)} ` +
+      `OPENCODE_MODEL=${shq(cfg.opencodeModel)} `;
     return env;
   });
 }

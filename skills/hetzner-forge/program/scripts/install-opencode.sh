@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # OpenCode server workload. Runs on the box (via SSH) AFTER harden.sh.
-# Uses opencode's native web auth: opencode serve reads OPENCODE_SERVER_USERNAME
+# Uses opencode's native web auth: opencode web reads OPENCODE_SERVER_USERNAME
 # and OPENCODE_SERVER_PASSWORD from the environment. No reverse proxy needed.
 #
 # Env (all injected over SSH, never via cloud-init):
@@ -32,10 +32,22 @@ OC_HOME="$(getent passwd "$OC_USER" | cut -d: -f6)"
 
 # --- opencode-go auth for the service user ---
 install -d -m 700 -o "$OC_USER" -g "$OC_USER" "$OC_HOME/.local/share/opencode"
-(umask 077; cat > "$OC_HOME/.local/share/opencode/auth.json" <<JSON
+if [ -n "${OPENCODE_API_KEY:-}" ]; then
+  (umask 077; cat > "$OC_HOME/.local/share/opencode/auth.json" <<JSON
 {"opencode-go":{"type":"api","key":"${OPENCODE_API_KEY}"}}
 JSON
-)
+  )
+else
+  # No API key was supplied to the agent. Write a placeholder so the service
+  # file and permissions are in place; the user replaces this over SSH.
+  (umask 077; cat > "$OC_HOME/.local/share/opencode/auth.json" <<JSON
+{"opencode-go":{"type":"api","key":"PASTE_YOUR_OPENCODE_GO_API_KEY_HERE"}}
+JSON
+  )
+  echo "[forge] WARNING: no OPENCODE_API_KEY was provided. Replace the placeholder in"
+  echo "        $OC_HOME/.local/share/opencode/auth.json and run"
+  echo "        'sudo systemctl restart opencode-serve.service' before using OpenCode."
+fi
 chown -R "$OC_USER:$OC_USER" "$OC_HOME/.local"
 
 # --- default model so a fresh session is ready to chat ---
@@ -52,7 +64,7 @@ chown -R "$OC_USER:$OC_USER" "$OC_HOME/projects"
 chmod -R g+rwX "$OC_HOME/projects"
 chmod g+s "$OC_HOME/projects" "$OC_HOME/projects/scratch"   # new files inherit the shared group
 
-# --- opencode serve on loopback, as the non-sudo user, with native auth ---
+# --- opencode web on loopback, as the non-sudo user, with native auth ---
 cat > /etc/systemd/system/opencode-serve.service <<UNIT
 [Unit]
 Description=OpenCode server
@@ -66,7 +78,7 @@ Environment=HOME=${OC_HOME}
 Environment=OPENCODE_SERVER_USERNAME=${OPENCODE_SERVER_USERNAME:-opencode}
 Environment=OPENCODE_SERVER_PASSWORD=${OPENCODE_SERVER_PASSWORD}
 WorkingDirectory=${OC_HOME}/projects
-ExecStart=/usr/local/bin/opencode serve --hostname 127.0.0.1 --port ${PORT}
+ExecStart=/usr/local/bin/opencode web --hostname 127.0.0.1 --port ${PORT}
 Restart=always
 RestartSec=5
 

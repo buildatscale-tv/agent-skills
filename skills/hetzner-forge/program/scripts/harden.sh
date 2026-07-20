@@ -147,6 +147,9 @@ if [ "$ACCESS" = "tailscale" ]; then
 fi
 
 ufw --force enable
+# Brief pause lets the iptables rules settle before sshd is restarted; this
+# avoids a race where a fresh connection arrives during the UFW/ssh state change.
+sleep 2
 
 # --- apply the SSH lockdown LAST (see note at the drop-in above) -----------
 systemctl restart ssh 2>/dev/null || systemctl restart sshd 2>/dev/null || true
