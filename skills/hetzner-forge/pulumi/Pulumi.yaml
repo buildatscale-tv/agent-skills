@@ -1,8 +1,0 @@
-name: hetzner-forge
-runtime: nodejs
-description: >-
-  A hardened, preconfigured Hetzner Cloud box provisioned with Pulumi. Base
-  hardening (non-root sudo user, key-only SSH, UFW, fail2ban, unattended
-  upgrades) plus a pluggable workload (Coolify, Docker, Dokploy, or a
-  skill-injected custom target) and optional peripherals (volume, private
-  network, primary IP).

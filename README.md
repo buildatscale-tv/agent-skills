@@ -12,7 +12,7 @@ Create, manage, and tear down [Namespace](https://namespace.so/?ref=buildatscale
 
 ### [/hetzner-forge](skills/hetzner-forge/)
 
-Provision a hardened, ready-to-go [Hetzner Cloud](https://www.hetzner.com/cloud) box with Pulumi in one guided flow. Base hardening (non-root sudo user, key-only SSH, UFW, fail2ban, unattended upgrades, Cloud Firewall) plus a pluggable workload — Coolify, Docker, Dokploy, or a custom target the skill resolves from official images or the vendor's documented install. Choose hardened SSH or Tailscale access; add volumes, private networks, and more.
+Provision a hardened, ready-to-go [Hetzner Cloud](https://www.hetzner.com/cloud) box with the `hcloud` CLI + cloud-init in one guided flow — no Pulumi. Base hardening (non-root sudo user, key-only SSH, UFW, fail2ban, unattended upgrades, Cloud Firewall) plus a pluggable workload — Coolify, Docker, Dokploy, an OpenCode server (browser UI behind a login), or a custom target resolved from official images or the vendor's documented install.
 
 ## Install
 
