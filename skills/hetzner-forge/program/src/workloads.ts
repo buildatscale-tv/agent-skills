@@ -13,8 +13,12 @@ export interface WorkloadSpec {
   hetznerImage?: string;
   /** From-scratch installer (bash), run after hardening in cloud-init. Used when no image exists. */
   install?: string;
-  /** Ingress TCP ports to open (besides SSH). */
-  ports: number[];
+  /** True when the installer needs secrets delivered over SSH (runs post-boot, never in user_data). */
+  installNeedsSecrets?: boolean;
+  /** Admin TCP ports (dashboards, control UIs) — reachable only from adminCidrs. */
+  adminPorts: number[];
+  /** Public TCP ports (web traffic the platform serves) — open to the world. */
+  publicPorts: number[];
   /** Docs URL for the workload / install procedure. */
   docs: string;
   /** Human-facing hint about where the app lives once it's up. */
@@ -24,43 +28,55 @@ export interface WorkloadSpec {
 // Built-in workloads. Verified against `hcloud image list --type app`:
 //   - coolify, docker-ce  -> official images exist  (image + post-harden)
 //   - dokploy             -> no image               (documented from-scratch)
+// Port rule: dashboards/control UIs are adminPorts (you-only); the HTTP(S)
+// traffic a platform serves to its users is publicPorts (world).
 const REGISTRY: Record<string, Omit<WorkloadSpec, "key">> = {
   base: {
-    ports: [],
+    adminPorts: [],
+    publicPorts: [],
     docs: "",
     ready: "Plain hardened box — no workload installed.",
   },
   coolify: {
     hetznerImage: "coolify",
-    ports: [80, 443, 8000],
+    adminPorts: [8000],
+    publicPorts: [80, 443],
     docs: "https://coolify.io/docs",
     ready:
-      "Coolify dashboard at http://<ipv4>:8000 — create the admin account on first visit. " +
-      "Deployed apps are served through Coolify's proxy on 80/443.",
+      "Coolify dashboard at http://<ipv4>:8000 (reachable only from your admin CIDRs) — " +
+      "create the admin account on first visit. Deployed apps are served publicly on 80/443.",
   },
   docker: {
     hetznerImage: "docker-ce",
-    ports: [],
+    adminPorts: [],
+    publicPorts: [],
     docs: "https://docs.docker.com/engine/",
-    ready: "Docker Engine preinstalled. Open application ports with `extraPorts`.",
+    ready:
+      "Docker Engine preinstalled. Open app ports with `extraPorts` (you-only) or " +
+      "`publicPorts` (world).",
   },
   dokploy: {
     install: "curl -sSL https://dokploy.com/install.sh | sh",
-    ports: [80, 443, 3000],
+    adminPorts: [3000],
+    publicPorts: [80, 443],
     docs: "https://docs.dokploy.com/docs/core/installation",
-    ready: "Dokploy dashboard at http://<ipv4>:3000. Deployed apps are served on 80/443.",
+    ready:
+      "Dokploy dashboard at http://<ipv4>:3000 (reachable only from your admin CIDRs). " +
+      "Deployed apps are served publicly on 80/443.",
   },
   // OpenCode server: `opencode serve` behind nginx basic-auth, run as a dedicated
-  // non-sudo `opencode` user. Reached privately over an SSH tunnel (ports stays empty
-  // — no public exposure). Install env (ADMIN_USER, OPENCODE_*) is injected by
-  // buildCloudInit. See scripts/install-opencode.sh.
+  // non-sudo `opencode` user. Reached privately over an SSH tunnel — no ports opened
+  // at all. The install needs secrets (API key, web password), so it runs post-boot
+  // over SSH, never in user_data. See scripts/install-opencode.sh.
   opencode: {
     install: opencodeInstall,
-    ports: [],
+    installNeedsSecrets: true,
+    adminPorts: [],
+    publicPorts: [],
     docs: "https://opencode.ai/docs",
     ready:
-      "OpenCode behind nginx basic-auth on :4096 (opencode itself on 127.0.0.1:4097, run as a " +
-      "non-sudo user). Reach it via SSH tunnel: ssh -L 4096:localhost:4096 <adminUser>@<ipv4>, " +
+      "OpenCode server with native web auth on :4096 (run as a non-sudo user). " +
+      "Reach it via SSH tunnel: ssh -L 4096:localhost:4096 <adminUser>@<ipv4>, " +
       "then http://localhost:4096 and log in.",
   },
 };
@@ -78,7 +94,8 @@ export function resolveWorkload(cfg: ForgeConfig): WorkloadSpec {
       hetznerImage: cfg.customImage,
       // Prefer the image; only run a from-scratch install when there is no image.
       install: cfg.customImage ? undefined : cfg.customInstall,
-      ports: cfg.customPorts,
+      adminPorts: cfg.customPorts,
+      publicPorts: [],
       docs: cfg.customDocs ?? "",
       ready: cfg.customImage
         ? `Custom image '${cfg.customImage}' booted. Check the provider docs for the app URL.`
