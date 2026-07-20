@@ -63,8 +63,10 @@ deploy, see Fallback options above.
 
 ## Reaching it (private, via SSH tunnel)
 
-- **This Mac:** `ssh -L 4096:localhost:4096 <adminUser>@<ipv4>` → `http://localhost:4096`
-- **Phone / LAN:** `ssh -L 0.0.0.0:4096:localhost:4096 <adminUser>@<ipv4>` → `http://<mac-lan-ip>:4096`
+- **This Mac:** `ssh -N -L 4096:localhost:4096 <adminUser>@<ipv4>` → `http://localhost:4096`
+- **Phone / LAN:** `ssh -N -L 0.0.0.0:4096:localhost:4096 <adminUser>@<ipv4>` → `http://<mac-lan-ip>:4096`
+
+Add `-f` before `-N` to run the tunnel in the background.
 
 If your ssh-agent holds many keys, use `-i <key> -o IdentitiesOnly=yes` (harden.sh caps `MaxAuthTries`).
 

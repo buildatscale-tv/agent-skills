@@ -272,7 +272,7 @@ export const opencodeModel = pulumi.output(cfg.opencodeModel);
 export const opencodeApiKeyStatusOut = opencodeApiKeyStatus;
 export const opencodePassword = cfg.opencodePassword;
 export const webUrl = pulumi.interpolate`http://localhost:${cfg.opencodePort}`;
-export const sshTunnelCommand = pulumi.interpolate`ssh -L ${cfg.opencodePort}:localhost:${cfg.opencodePort} ${cfg.adminUser}@${server.ipv4Address}`;
+export const sshTunnelCommand = pulumi.interpolate`ssh -N -L ${cfg.opencodePort}:localhost:${cfg.opencodePort} ${cfg.adminUser}@${server.ipv4Address}`;
 
 // Helper for the summary line about the password. Kept separate so the summary
 // itself does not become a Pulumi secret and is readable by default.
@@ -359,7 +359,8 @@ SSH to the box:
   ssh ${cfg.adminUser}@${server.ipv4Address}
 
 OpenCode via SSH tunnel:
-  ssh -L ${cfg.opencodePort}:localhost:${cfg.opencodePort} ${cfg.adminUser}@${server.ipv4Address}
+  ${sshTunnelCommand}
+  (add -f to run it in the background: ssh -f -N -L ${cfg.opencodePort}:localhost:${cfg.opencodePort} ${cfg.adminUser}@${server.ipv4Address})
   Then open http://localhost:${cfg.opencodePort} and log in as ${cfg.opencodeUsername}.
 
 From your phone use an SSH client like Termius/iSH with the same tunnel.
