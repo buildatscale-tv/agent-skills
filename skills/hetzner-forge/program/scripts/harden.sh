@@ -22,6 +22,7 @@
 set -euo pipefail
 
 ADMIN_USER="${ADMIN_USER:-deploy}"
+ACCESS="${ACCESS:-ssh}"
 TIMEZONE="${TIMEZONE:-UTC}"
 SWAP_GB="${SWAP_GB:-0}"
 ADMIN_CIDRS="${ADMIN_CIDRS:-}"
@@ -135,16 +136,14 @@ for p in $PUBLIC_PORTS; do
 done
 
 # --- Tailscale (optional) --------------------------------------------------
-# Install the Tailscale client unconditionally so that a later switch from
-# access=ssh to access=tailscale does not require a server rebuild. Allow the
-# tailscale0 interface in UFW unconditionally (harmless when not authenticated).
-# Only bring the mesh up if an auth key is available (delivered over SSH post-boot).
-if ! command -v tailscale >/dev/null 2>&1; then
-  curl -fsSL https://tailscale.com/install.sh | sh
-fi
-ufw allow in on tailscale0 || true
-if [ -n "${TAILSCALE_AUTHKEY:-}" ]; then
-  tailscale up --ssh --authkey "$TAILSCALE_AUTHKEY" || log "tailscale up failed — run 'tailscale up --ssh' manually"
+if [ "$ACCESS" = "tailscale" ]; then
+  if ! command -v tailscale >/dev/null 2>&1; then
+    curl -fsSL https://tailscale.com/install.sh | sh
+  fi
+  ufw allow in on tailscale0 || true
+  if [ -n "${TAILSCALE_AUTHKEY:-}" ]; then
+    tailscale up --ssh --authkey "$TAILSCALE_AUTHKEY" || log "tailscale up failed — run 'tailscale up --ssh' manually"
+  fi
 fi
 
 ufw --force enable

@@ -10,6 +10,7 @@
 #   OPENCODE_SERVER_USERNAME   web-login username (default: opencode)
 #   OPENCODE_SERVER_PASSWORD   web-login password
 #   OPENCODE_MODEL             default model for new sessions
+#   ACCESS                     access mode: ssh | tailscale (default ssh)
 #
 # opencode + the agent it runs are isolated to a dedicated NON-SUDO system user
 # ("opencode") so the agent can never escalate to root.
@@ -17,8 +18,15 @@ set -euo pipefail
 export HOME="${HOME:-/root}"   # SSH may run as root; the opencode installer needs HOME
 export DEBIAN_FRONTEND=noninteractive
 PORT="${OPENCODE_PORT:-4096}"
+ACCESS="${ACCESS:-ssh}"
 OC_USER=opencode               # dedicated, no-sudo service user (the agent runs as this)
 ADMIN_USER="${ADMIN_USER:-deploy}"
+
+# Bind address: always loopback. Caddy runs in front of OpenCode on port 80
+# (host network) and reverse-proxies to 127.0.0.1:4096. Tailscale serve then
+# exposes Caddy on the tailnet HTTPS URL. Public exposure is still blocked by
+# the Hetzner Cloud Firewall and host UFW default-deny.
+BIND_HOST="127.0.0.1"
 
 # --- Node + opencode (binary installed system-wide) ---
 curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
@@ -64,7 +72,7 @@ chown -R "$OC_USER:$OC_USER" "$OC_HOME/projects"
 chmod -R g+rwX "$OC_HOME/projects"
 chmod g+s "$OC_HOME/projects" "$OC_HOME/projects/scratch"   # new files inherit the shared group
 
-# --- opencode web on loopback, as the non-sudo user, with native auth ---
+# --- opencode web on the chosen interface, as the non-sudo user, with native auth ---
 cat > /etc/systemd/system/opencode-serve.service <<UNIT
 [Unit]
 Description=OpenCode server
@@ -78,7 +86,7 @@ Environment=HOME=${OC_HOME}
 Environment=OPENCODE_SERVER_USERNAME=${OPENCODE_SERVER_USERNAME:-opencode}
 Environment=OPENCODE_SERVER_PASSWORD=${OPENCODE_SERVER_PASSWORD}
 WorkingDirectory=${OC_HOME}/projects
-ExecStart=/usr/local/bin/opencode web --hostname 127.0.0.1 --port ${PORT}
+ExecStart=/usr/local/bin/opencode web --hostname ${BIND_HOST} --port ${PORT}
 Restart=always
 RestartSec=5
 

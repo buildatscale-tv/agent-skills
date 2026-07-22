@@ -1,0 +1,12 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "Trello": {
+      "type": "local",
+      "command": [
+        "bunx",
+        "@delorenj/mcp-server-trello@1.7.1"
+      ]
+    }
+  },
+}

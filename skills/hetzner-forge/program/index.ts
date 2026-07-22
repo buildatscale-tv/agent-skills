@@ -12,6 +12,7 @@ import {
   hardenEnvBase,
   withTailscaleKey,
   installEnv,
+  devSetupEnv,
   buildCloudInit,
 } from "./src/hardening";
 import { networkZoneFor } from "./src/peripherals";
@@ -173,6 +174,7 @@ if (cfg.volumeSizeGb > 0) {
 const waitForCloudInit = "cloud-init status --wait >/dev/null 2>&1 || true; ";
 const needsTailscaleUp = !imageBased && cfg.access === "tailscale";
 const needsSecretInstall = !imageBased && !!workload.install && !!workload.installNeedsSecrets;
+let tailscaleUpCmd: command.remote.Command | undefined;
 
 if (imageBased || needsTailscaleUp || needsSecretInstall) {
   const privateKey = fs.readFileSync(expandTilde(cfg.sshPrivateKeyPath), "utf8");
@@ -211,14 +213,15 @@ FORGE_EOF`,
 
   // From-scratch + Tailscale: cloud-init installed Tailscale without the key;
   // bring the mesh up now as the admin user, with the key travelling only over SSH.
+  // The command emits the Tailscale IPv4 on stdout so we can expose it in outputs.
   if (needsTailscaleUp && cfg.tailscaleAuthKey) {
-    new command.remote.Command(
+    tailscaleUpCmd = new command.remote.Command(
       `${cfg.name}-tailscale-up`,
       {
         connection: adminConnection,
         // Tailscale may not be installed if the box was originally created with
         // access=ssh. Install it only if missing, then authenticate.
-        create: pulumi.interpolate`${waitForCloudInit}(command -v tailscale >/dev/null 2>&1 || curl -fsSL https://tailscale.com/install.sh | sh) && sudo tailscale up --ssh --authkey ${cfg.tailscaleAuthKey}`,
+        create: pulumi.interpolate`${waitForCloudInit}(command -v tailscale >/dev/null 2>&1 || curl -fsSL https://tailscale.com/install.sh | sh) && sudo tailscale up --ssh --authkey ${cfg.tailscaleAuthKey} && tailscale ip -4`,
         triggers: [server.id],
       },
       { dependsOn: [server] },
@@ -228,8 +231,9 @@ FORGE_EOF`,
   // Secret-bearing installer (opencode): env carries the secrets over SSH.
   // `sudo env ... bash -s` bypasses sudo's environment filtering and ensures the
   // install script sees the credentials without ever touching user_data.
+  let installCmd: command.remote.Command | undefined;
   if (needsSecretInstall) {
-    new command.remote.Command(
+    installCmd = new command.remote.Command(
       `${cfg.name}-install`,
       {
         connection: adminConnection,
@@ -238,7 +242,89 @@ ${workload.install}
 FORGE_EOF`,
         triggers: [server.id],
       },
-      { dependsOn: [server] },
+      { dependsOn: tailscaleUpCmd ? [server, tailscaleUpCmd] : [server] },
+    );
+  }
+
+  // Caddy media front-end: default for the opencode workload. Serves /media/*
+  // from /srv/media and reverse-proxies everything else to OpenCode on :4096.
+  // Tailscale serve is then pointed at Caddy (port 80) so web UI + media share
+  // the same HTTPS origin.
+  const needsCaddy = cfg.workload === "opencode";
+  let caddyCmd: command.remote.Command | undefined;
+  if (needsCaddy) {
+    const caddyScript = path.join(__dirname, "scripts", "install-caddy.sh");
+    const caddyFilesDir = path.join(__dirname, "files", "caddy");
+
+    const caddyScriptAsset = new pulumi.asset.FileAsset(caddyScript);
+    const copyCaddyScript = new command.remote.CopyToRemote(
+      `${cfg.name}-caddy-script`,
+      {
+        connection: adminConnection,
+        source: caddyScriptAsset,
+        remotePath: "/tmp/install-caddy.sh",
+      },
+      { dependsOn: installCmd ? [installCmd] : [server] },
+    );
+
+    const caddyFilesArchive = new pulumi.asset.FileArchive(caddyFilesDir);
+    const copyCaddyFiles = new command.remote.CopyToRemote(
+      `${cfg.name}-caddy-files`,
+      {
+        connection: adminConnection,
+        source: caddyFilesArchive,
+        remotePath: "/tmp/opencode-caddy",
+      },
+      { dependsOn: installCmd ? [installCmd] : [server] },
+    );
+
+    caddyCmd = new command.remote.Command(
+      `${cfg.name}-caddy-install`,
+      {
+        connection: adminConnection,
+        create: pulumi.interpolate`sudo chmod +x /tmp/install-caddy.sh && sudo env OC_USER=opencode /tmp/install-caddy.sh 2>&1 | sudo tee /var/log/hetzner-forge-caddy.log`,
+        triggers: [server.id, caddyScriptAsset, caddyFilesArchive],
+      },
+      { dependsOn: [copyCaddyScript, copyCaddyFiles] },
+    );
+  }
+
+  // Dev environment setup: tools, mirrored local opencode config, and secrets.
+  const needsDevSetup = cfg.workload === "opencode" && (cfg.gitUserName || cfg.trelloToken);
+  if (needsDevSetup) {
+    const devSetupScript = path.join(__dirname, "scripts", "dev-setup.sh");
+    const opencodeConfigDir = path.join(__dirname, "files", "opencode");
+
+    const devSetupScriptAsset = new pulumi.asset.FileAsset(devSetupScript);
+    const copyDevScript = new command.remote.CopyToRemote(
+      `${cfg.name}-dev-setup-script`,
+      {
+        connection: adminConnection,
+        source: devSetupScriptAsset,
+        remotePath: "/tmp/dev-setup.sh",
+      },
+      { dependsOn: caddyCmd ? [caddyCmd] : installCmd ? [installCmd] : [server] },
+    );
+
+    const opencodeConfigArchive = new pulumi.asset.FileArchive(opencodeConfigDir);
+    const copyOpencodeConfig = new command.remote.CopyToRemote(
+      `${cfg.name}-opencode-config`,
+      {
+        connection: adminConnection,
+        source: opencodeConfigArchive,
+        remotePath: "/tmp/opencode-config",
+      },
+      { dependsOn: caddyCmd ? [caddyCmd] : installCmd ? [installCmd] : [server] },
+    );
+
+    new command.remote.Command(
+      `${cfg.name}-dev-setup`,
+      {
+        connection: adminConnection,
+        create: pulumi.interpolate`sudo chmod +x /tmp/dev-setup.sh && sudo env OPENCODE_CONFIG_SOURCE=/tmp/opencode-config ${devSetupEnv(cfg)} /tmp/dev-setup.sh 2>&1 | sudo tee /var/log/hetzner-forge-dev-setup.log`,
+        triggers: [server.id, devSetupScriptAsset, opencodeConfigArchive],
+      },
+      { dependsOn: [copyDevScript, copyOpencodeConfig] },
     );
   }
 }
@@ -249,6 +335,27 @@ const fmtPorts = (ps: number[]) => (ps.length ? ps.join(", ") : "none");
 const opencodeApiKeyStatus = cfg.opencodeApiKey
   ? pulumi.output("provided as Pulumi secret")
   : pulumi.output("NOT provided — add manually via SSH before using OpenCode");
+
+const tailscaleIpOut = tailscaleUpCmd
+  ? tailscaleUpCmd.stdout.apply((s: string) => {
+      const m = s.match(/(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\s*$/m);
+      return m ? m[1].trim() : s.trim().split(/\r?\n/).pop()?.trim() ?? "";
+    })
+  : pulumi.output("");
+// OpenCode always binds to loopback; Caddy fronts it on port 80 and serves
+// /media/* from /srv/media. Tailscale serve exposes Caddy on HTTPS.
+const opencodeWebUrl =
+  cfg.access === "tailscale"
+    ? pulumi.interpolate`https://${tailscaleIpOut}`
+    : pulumi.interpolate`http://localhost:8080`;
+const sshTunnelCommandOut = pulumi.interpolate`ssh -N -L 8080:localhost:80 ${cfg.adminUser}@${server.ipv4Address}`;
+const opencodeConnectionHint =
+  cfg.access === "tailscale"
+    ? pulumi.interpolate`OpenCode is reachable over Tailscale at ${opencodeWebUrl} (log in as ${cfg.opencodeUsername}). Media is served from /srv/media via Caddy on the same origin.`
+    : pulumi.interpolate`OpenCode via SSH tunnel:
+  ${sshTunnelCommandOut}
+  (add -f to run it in the background: ssh -f -N -L 8080:localhost:80 ${cfg.adminUser}@${server.ipv4Address})
+  Then open ${opencodeWebUrl} and log in as ${cfg.opencodeUsername}. Media is served from /srv/media via Caddy on the same origin.`;
 
 export const serverId = server.id;
 export const serverName = server.name;
@@ -267,14 +374,18 @@ export const firewallName = firewall.name;
 export const adminPortsOut = pulumi.output(fmtPorts(adminPorts));
 export const publicPortsOut = pulumi.output(fmtPorts(publicPorts));
 export const workloadKey = workload.key;
-export const appHint = workload.ready;
+export const appHint =
+  workload.key === "opencode"
+    ? pulumi.interpolate`OpenCode server with native web auth, fronted by Caddy on :80 (run as a non-sudo user). Reach it at ${opencodeWebUrl} and log in as ${cfg.opencodeUsername}. Save images to /srv/media and reference them as /media/<file>.`
+    : pulumi.output(workload.ready);
 export const opencodeUsername = pulumi.output(cfg.opencodeUsername);
 export const opencodePort = pulumi.output(cfg.opencodePort);
 export const opencodeModel = pulumi.output(cfg.opencodeModel);
 export const opencodeApiKeyStatusOut = opencodeApiKeyStatus;
 export const opencodePassword = cfg.opencodePassword;
-export const webUrl = pulumi.interpolate`http://localhost:${cfg.opencodePort}`;
-export const sshTunnelCommand = pulumi.interpolate`ssh -N -L ${cfg.opencodePort}:localhost:${cfg.opencodePort} ${cfg.adminUser}@${server.ipv4Address}`;
+export const webUrl = opencodeWebUrl;
+export const sshTunnelCommand = sshTunnelCommandOut;
+export const tailscaleIp = tailscaleIpOut;
 
 // Helper for the summary line about the password. Kept separate so the summary
 // itself does not become a Pulumi secret and is readable by default.
@@ -288,13 +399,13 @@ Box '${cfg.name}' (${cfg.serverType} @ ${cfg.location}) is up.
   IPv4:  ${server.ipv4Address}
   SSH:   ssh ${cfg.adminUser}@${server.ipv4Address}
   Logs:  ssh ${cfg.adminUser}@${server.ipv4Address} 'sudo tail -n 100 /var/log/hetzner-forge-harden.log'
-
+${cfg.access === "tailscale" ? pulumi.interpolate`  Tailscale IP: ${tailscaleIp}\n` : pulumi.output("")}
 Workload (${workload.key}): ${workload.ready}
 
 Exposure: SSH + admin ports (${fmtPorts(adminPorts)}) reachable only from your
 admin CIDRs (${cfg.adminCidrs.join(", ")}); public ports (${fmtPorts(publicPorts)})
 open to the world. Gated by the Hetzner Cloud Firewall, attached at creation.
-
+${cfg.access === "tailscale" ? pulumi.output("Tailscale (WireGuard) is enabled; the workload is reachable over the tailnet.") : pulumi.output("")}
 Hardened with a non-root sudo user ('${cfg.adminUser}'), key-only SSH, root login
 disabled, UFW default-deny, fail2ban, and unattended security upgrades.
 `;
@@ -348,8 +459,9 @@ SSH hardening: Port 22, PermitRootLogin no, PasswordAuthentication no, PubkeyAut
 | Attribute | Value |
 |---|---|
 | Service user | opencode |
-| Bind address | 127.0.0.1:${cfg.opencodePort} |
-| Web UI (via tunnel) | http://localhost:${cfg.opencodePort} |
+| Bind address | 127.0.0.1:${cfg.opencodePort} (Caddy on :80) |
+| Web UI | ${opencodeWebUrl} |
+| Media dir | /srv/media (served as /media/*) |
 | Web username | ${cfg.opencodeUsername} |
 | Web password | ${passwordHint} |
 | Default model | ${cfg.opencodeModel} |
@@ -360,12 +472,9 @@ SSH hardening: Port 22, PermitRootLogin no, PasswordAuthentication no, PubkeyAut
 SSH to the box:
   ssh ${cfg.adminUser}@${server.ipv4Address}
 
-OpenCode via SSH tunnel:
-  ${sshTunnelCommand}
-  (add -f to run it in the background: ssh -f -N -L ${cfg.opencodePort}:localhost:${cfg.opencodePort} ${cfg.adminUser}@${server.ipv4Address})
-  Then open http://localhost:${cfg.opencodePort} and log in as ${cfg.opencodeUsername}.
+${opencodeConnectionHint}
 
-From your phone use an SSH client like Termius/iSH with the same tunnel.
+${cfg.access === "tailscale" ? pulumi.output("Make sure the device you browse from is logged into the same Tailscale network.") : pulumi.output("From your phone use an SSH client like Termius/iSH with the same tunnel.")}
 
 ## Management
 

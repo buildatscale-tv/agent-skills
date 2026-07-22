@@ -44,6 +44,12 @@ export interface ForgeConfig {
   opencodePassword?: pulumi.Output<string>;
   opencodePort: number;
   opencodeModel: string;
+
+  // Dev environment extras
+  gitUserName?: string;
+  gitUserEmail?: string;
+  trelloToken?: pulumi.Output<string>;
+  trelloApiKey?: pulumi.Output<string>;
 }
 
 function parsePorts(csv: string | undefined, key: string): number[] {
@@ -141,5 +147,10 @@ export function loadConfig(): ForgeConfig {
     opencodePassword: workload === "opencode" ? c.requireSecret("opencodePassword") : undefined,
     opencodePort: c.getNumber("opencodePort") ?? 4096,
     opencodeModel: c.get("opencodeModel") ?? "opencode-go/kimi-k3",
+
+    gitUserName: c.get("gitUserName"),
+    gitUserEmail: c.get("gitUserEmail"),
+    trelloToken: c.getSecret("trelloToken"),
+    trelloApiKey: c.getSecret("trelloApiKey"),
   };
 }

@@ -65,11 +65,28 @@ export function installEnv(cfg: ForgeConfig): pulumi.Output<string> {
   const key = cfg.opencodeApiKey ?? pulumi.output("");
   const pass = cfg.opencodePassword ?? pulumi.output("");
   return pulumi.all([key, pass]).apply(([k, p]) => {
-    let env = `ADMIN_USER=${shq(cfg.adminUser)} `;
+    let env = `ADMIN_USER=${shq(cfg.adminUser)} ACCESS=${shq(cfg.access)} `;
     env +=
       `OPENCODE_API_KEY=${shq(k)} OPENCODE_PORT=${shq(String(cfg.opencodePort))} ` +
       `OPENCODE_SERVER_USERNAME=${shq(cfg.opencodeUsername)} OPENCODE_SERVER_PASSWORD=${shq(p)} ` +
       `OPENCODE_MODEL=${shq(cfg.opencodeModel)} `;
+    return env;
+  });
+}
+
+/**
+ * Env for the dev-setup.sh post-install script. Secrets (Trello token/key) are
+ * delivered over SSH and stored in Pulumi state encrypted.
+ */
+export function devSetupEnv(cfg: ForgeConfig): pulumi.Output<string> {
+  const token = cfg.trelloToken ?? pulumi.output("");
+  const key = cfg.trelloApiKey ?? pulumi.output("");
+  return pulumi.all([token, key]).apply(([t, k]) => {
+    let env = `ADMIN_USER=${shq(cfg.adminUser)} `;
+    if (cfg.gitUserName) env += `GIT_USER_NAME=${shq(cfg.gitUserName)} `;
+    if (cfg.gitUserEmail) env += `GIT_USER_EMAIL=${shq(cfg.gitUserEmail)} `;
+    if (t) env += `TRELLO_TOKEN=${shq(t)} `;
+    if (k) env += `TRELLO_API_KEY=${shq(k)} `;
     return env;
   });
 }
