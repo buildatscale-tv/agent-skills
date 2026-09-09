@@ -1,5 +1,5 @@
 ---
-name: env-setup-git
+name: cursor-env-setup
 description: >-
   Set up a Cursor Cloud Agent environment for a new or existing repo: run
   Cursor's built-in /env-setup (or agent-driven Cloud Environment setup) for
