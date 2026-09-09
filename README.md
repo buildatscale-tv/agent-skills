@@ -12,6 +12,10 @@ Or copy the skill directory into your project.
 
 ## Skills
 
+### [/cursor-env-setup](skills/cursor-env-setup/)
+
+Layer human git identity, slash-free branch names, and Co-authored-by blocking onto Cursor Cloud Agent `/env-setup`. Includes `git-identity.sh`, commit hooks, and instructions for personal Cloud Agent secrets (`GIT_AUTHOR_*_OVERRIDE`, optional `GIT_SIGNING_SSH_KEY`).
+
 ### [/devbox](skills/devbox/)
 
 Create, manage, and tear down [Namespace](https://namespace.so/?ref=buildatscale-yt) devboxes from any AI agent. Supports GitHub issue dispatch, ad-hoc tasks, multi-variant model comparison, and plain devbox management.
@@ -20,9 +24,6 @@ Create, manage, and tear down [Namespace](https://namespace.so/?ref=buildatscale
 
 Generate images with Google's Gemini image models (Nano Banana Flash/Pro/2, up to 4K) from any AI agent — hero images, illustrations, icons, backgrounds, or standalone artwork. Supports aspect ratios, reference images for style guidance, and resolution control.
 
-### [/cursor-env-setup](skills/cursor-env-setup/)
-
-Layer human git identity, slash-free branch names, and Co-authored-by blocking onto Cursor Cloud Agent `/env-setup`. Includes `git-identity.sh`, commit hooks, and instructions for personal Cloud Agent secrets (`GIT_AUTHOR_*_OVERRIDE`, optional `GIT_SIGNING_SSH_KEY`).
 
 ### [/promo-video](skills/promo-video/)
 
