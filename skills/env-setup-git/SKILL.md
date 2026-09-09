@@ -116,8 +116,9 @@ Set these as **personal-scoped** secrets in the [Cloud Agents dashboard](https:/
 ### Encode a signing key (optional)
 
 ```bash
-base64 < ~/.ssh/id_ed25519_signing | tr -d '\n'
-# or: base64 -i ~/.ssh/id_ed25519_signing | tr -d '\n'   # macOS
+# macOS (default)
+base64 < ~/.ssh/git_signing_key | tr -d '\n' | pbcopy
+# Linux: base64 < ~/.ssh/git_signing_key | tr -d '\n'
 ```
 
 Paste the single line into `GIT_SIGNING_SSH_KEY`. If the key cannot be parsed, the script disables signing instead of blocking commits.
