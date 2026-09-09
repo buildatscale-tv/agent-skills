@@ -1,0 +1,36 @@
+#!/bin/bash
+# Repo pre-commit guard. Installed into .git/hooks by .cursor/install.sh; on
+# Cloud Agents it runs via Cursor's hook dispatcher (which chains to
+# /workspace/.git/hooks) alongside the managed secret scanner.
+set -euo pipefail
+
+# 1) Enforce the commit author email when an expected value is provided.
+ALLOWED_EMAIL="${GIT_AUTHOR_EMAIL_OVERRIDE:-}"
+if [ -n "$ALLOWED_EMAIL" ]; then
+  COMMITTER_EMAIL="$(git config user.email || true)"
+  if [ "$COMMITTER_EMAIL" != "$ALLOWED_EMAIL" ]; then
+    echo "Error: committer email ($COMMITTER_EMAIL) is not allowed."
+    echo "Please set your email to $ALLOWED_EMAIL using:"
+    echo "  git config user.email \"$ALLOWED_EMAIL\""
+    exit 1
+  fi
+fi
+
+# 2) Neutralize Cursor's managed "Co-authored-by:" appender before the
+#    commit-msg phase runs.
+hooks_dir="$(git config core.hooksPath 2>/dev/null || true)"
+if [ -n "${hooks_dir:-}" ] && [ -d "$hooks_dir" ]; then
+  find "$hooks_dir" -maxdepth 1 -name '*.co-author' -exec chmod -x {} + 2>/dev/null || true
+fi
+
+# 3) Disallow slashes in branch names (blocks Cloud Agent cursor/ prefixes).
+#    Empty/detached HEAD is allowed so rebases can commit.
+BRANCH_NAME="$(git symbolic-ref --short HEAD 2>/dev/null || true)"
+if [ -n "$BRANCH_NAME" ] && [[ "$BRANCH_NAME" == */* ]]; then
+  echo "ERROR: Branch names containing slashes (/) are disallowed in this repository."
+  echo "Your current branch is: $BRANCH_NAME"
+  echo "Please rename your branch using: git branch -m <new-name>"
+  exit 1
+fi
+
+exit 0
