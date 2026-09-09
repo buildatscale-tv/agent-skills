@@ -32,7 +32,7 @@ Keep stack-specific install steps (Ruby, Node, Postgres, etc.) in the project's 
 | Author | Human from `GIT_AUTHOR_NAME_OVERRIDE` + `GIT_AUTHOR_EMAIL_OVERRIDE` |
 | Co-author trailer | **Blocked** — neutralize Cursor `*.co-author` hooks; strip any `Co-authored-by:` lines |
 | Subject line | Strip a trailing period on the first non-blank line |
-| Branch names | **No slashes** (blocks managed `cursor/...` prefixes). Prefer short kebab-case (2–3 words) |
+| Branch names | **No slashes** (blocks managed `cursor/...` prefixes). Prefer short kebab-case (2–3 words). Avoid agent random suffixes (convention) |
 | Signing | Optional SSH signing via `GIT_SIGNING_SSH_KEY`; if identity is overridden without a key, disable Cursor's managed signing so GitHub does not show Unverified under the human's name |
 
 When the override secrets are **unset**, leave Cursor's default identity alone (safe for contributors who have not configured personal secrets).
@@ -93,7 +93,9 @@ Add a short Cloud Agents section, for example:
 - Commits must be authored as the human configured by Cloud Agent secrets — do **not** author as `Cursor Agent` and do **not** add a `Co-authored-by:` trailer.
 - `.cursor/git-identity.sh` (from `start.sh`) sets `user.name` / `user.email` from `GIT_AUTHOR_NAME_OVERRIDE` and `GIT_AUTHOR_EMAIL_OVERRIDE`, disables Cursor `*.co-author` hooks, and signs with `GIT_SIGNING_SSH_KEY` when set.
 - `.githooks/commit-msg` strips `Co-authored-by:` and trailing periods on the subject; `.githooks/pre-commit` requires `user.email` to match `GIT_AUTHOR_EMAIL_OVERRIDE` when set, and blocks branch names that contain `/`.
-- Prefer short kebab-case branch names with **no** `/`.
+- Prefer short kebab-case branch names with **no** `/` and **no** `cursor/` prefix.
+- Do **not** append agent random suffixes to branch names (e.g. `-efe5`, `-99c1`) — document as convention; hooks do not enforce this.
+- Prefer short imperative commit subjects (≈70 chars, no trailing period).
 
 ### 5. Stop and instruct the human (secrets)
 
@@ -130,9 +132,25 @@ git config user.email
 # optional: git config --get commit.gpgsign
 ```
 
-Create a throwaway commit on a slash-free branch and confirm GitHub shows the human author (Verified if signing is configured).
+Create a throwaway commit on a slash-free branch and confirm GitHub shows the human author (Verified if signing is configured). Also confirm a slashy branch name is rejected at commit time.
+
+### Human checklist
+
+1. Create the three **personal** secrets above (signing key optional but recommended).
+2. Register the SSH public key as a GitHub **Signing key** (not only an auth key).
+3. Rebuild / refresh the Cloud Agent environment so `install` + `start` pick up the new scripts.
+4. Verify: human author, no `Co-authored-by:`, Verified when signing is configured, slash branch rejected on commit.
 
 ---
+
+## Gotchas
+
+- `git commit --no-verify` bypasses these hooks.
+- The slash rule runs at **commit** time, not branch creation. If the agent is already on `cursor/foo-99c1`, rename first: `git branch -m flat-kebab-name`.
+- Random suffixes (`-efe5`, `-99c1`) need AGENTS.md / prompt discipline — not hook-enforced.
+- Never put the private signing key in chat or the repo — personal Cloud Agent secret only.
+- Name/email override without `GIT_SIGNING_SSH_KEY` leaves commits **unsigned** by design (avoids Cursor-managed signatures under the human's name showing as Unverified).
+- Laptop-global `core.hooksPath` setups are **not** present on Cursor VMs. Cloud Agents must use the repo `.githooks` + secrets path from this skill.
 
 ## Out of scope
 
