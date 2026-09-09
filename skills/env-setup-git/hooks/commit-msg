@@ -1,0 +1,35 @@
+#!/bin/bash
+# Repo commit-msg guard. Installed into .git/hooks by .cursor/install.sh; on
+# Cloud Agents it runs via Cursor's hook dispatcher (which chains to
+# /workspace/.git/hooks) before the managed hooks for this phase.
+#
+# It (a) neutralizes Cursor's managed "Co-authored-by:" appender for this
+# commit, (b) strips any Co-authored-by: trailer already in the message, and
+# (c) removes a trailing period from the subject line.
+set -euo pipefail
+
+MSG_FILE="$1"
+
+# (a) Disable the managed co-author appender before the dispatcher reaches it.
+#     This hook runs first (as the repo's original commit-msg hook); dropping
+#     the execute bit makes the dispatcher skip *.co-author in the same commit.
+hooks_dir="$(git config core.hooksPath 2>/dev/null || true)"
+if [ -n "${hooks_dir:-}" ] && [ -d "$hooks_dir" ]; then
+  find "$hooks_dir" -maxdepth 1 -name '*.co-author' -exec chmod -x {} + 2>/dev/null || true
+fi
+
+# (b) Drop any Co-authored-by: trailer lines, and (c) strip a trailing period
+#     from the subject (first non-blank line). Body prose is left untouched.
+tmp="$(mktemp)"
+awk '
+  tolower($0) ~ /^[[:space:]]*co-authored-by:/ { next }
+  {
+    if (!subject_done && $0 ~ /[^[:space:]]/) {
+      sub(/[[:space:]]*\.+[[:space:]]*$/, "", $0)
+      subject_done = 1
+    }
+    print
+  }
+' "$MSG_FILE" > "$tmp" && mv "$tmp" "$MSG_FILE"
+
+exit 0
